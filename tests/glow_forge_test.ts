@@ -8,7 +8,7 @@ import {
 import { assertEquals } from 'https://deno.land/std@0.90.0/testing/asserts.ts';
 
 Clarinet.test({
-    name: "Can register a new brand",
+    name: "Can register a new brand with initial tier and rewards",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const deployer = accounts.get('deployer')!;
         const wallet1 = accounts.get('wallet_1')!;
@@ -31,11 +31,13 @@ Clarinet.test({
         let brand = brandInfo.result.expectSome().expectTuple();
         assertEquals(brand['name'], "Eco Brand");
         assertEquals(brand['verified'], false);
+        assertEquals(brand['tier'], "bronze");
+        assertEquals(brand['reward-points'], "u0");
     }
 });
 
 Clarinet.test({
-    name: "Can add product to registered brand",
+    name: "Brand earns reward points when adding products",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const wallet1 = accounts.get('wallet_1')!;
         
@@ -46,7 +48,7 @@ Clarinet.test({
             ], wallet1.address)
         ]);
         
-        // Then add product
+        // Add product
         let productBlock = chain.mineBlock([
             Tx.contractCall('glow-forge', 'add-product', [
                 types.uint(1), // brand-id
@@ -58,11 +60,21 @@ Clarinet.test({
         ]);
         
         productBlock.receipts[0].result.expectOk().expectUint(1);
+        
+        let brandInfo = chain.callReadOnlyFn(
+            'glow-forge',
+            'get-brand-by-id',
+            [types.uint(1)],
+            wallet1.address
+        );
+        
+        let brand = brandInfo.result.expectSome().expectTuple();
+        assertEquals(brand['reward-points'], "u10"); // Bronze tier multiplier (1) * 10 points
     }
 });
 
 Clarinet.test({
-    name: "Only owner can verify brands",
+    name: "Brand tier updates with sustainability score",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const deployer = accounts.get('deployer')!;
         const wallet1 = accounts.get('wallet_1')!;
@@ -74,22 +86,24 @@ Clarinet.test({
             ], wallet1.address)
         ]);
         
-        // Try to verify with non-owner
-        let failBlock = chain.mineBlock([
-            Tx.contractCall('glow-forge', 'verify-brand', [
-                types.uint(1)
-            ], wallet1.address)
-        ]);
-        
-        failBlock.receipts[0].result.expectErr().expectUint(100); // err-owner-only
-        
-        // Verify with owner
-        let successBlock = chain.mineBlock([
-            Tx.contractCall('glow-forge', 'verify-brand', [
-                types.uint(1)
+        // Update score to reach silver tier
+        let updateBlock = chain.mineBlock([
+            Tx.contractCall('glow-forge', 'update-sustainability-score', [
+                types.uint(1),
+                types.uint(70)
             ], deployer.address)
         ]);
         
-        successBlock.receipts[0].result.expectOk();
+        updateBlock.receipts[0].result.expectOk();
+        
+        let brandInfo = chain.callReadOnlyFn(
+            'glow-forge',
+            'get-brand-by-id',
+            [types.uint(1)],
+            deployer.address
+        );
+        
+        let brand = brandInfo.result.expectSome().expectTuple();
+        assertEquals(brand['tier'], "silver");
     }
 });
